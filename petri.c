@@ -11,6 +11,7 @@
 #include "petri.h"
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef enum {
     ARC_IN,
@@ -81,6 +82,36 @@ PetriArc * petri_arc(PetriNet *net, pn_arcdir d, pn_trans t, pn_place p, bool al
     return arc;
 }/* petri_arc */
 
+static
+bool petri_conf_arc(PetriNet *net, pn_arcdir d, pn_place p, pn_trans t, pn_weight w)
+{
+    if (net == NULL){
+        return false;
+    }
+
+    if (p >= net->nplaces || t >= net->ntrans){
+        return false;
+    }
+
+    /* setting a weight at 0 is the same to do not have the arc.
+     * If the arc already exists, it will be overwritten.
+     * If the arc does not exists, do no create it.
+     */
+    bool alloc = (w > 0);
+    PetriArc *arc = petri_arc(net, d, t, p, alloc);
+    if (arc == NULL && alloc){
+        /* it is a problem only when the allocation fails */
+        return false;
+    }
+
+    if (arc != NULL){
+        /* arc could be NULL if not found and alloc=false */
+        arc->weight = w;
+    }
+
+    return true;
+}/* petri_conf_arc */
+
 /******************** PUBLIC ***********************************/
 
 PetriNet * petri_new(size_t nplaces, size_t ntrans)
@@ -144,43 +175,12 @@ size_t petri_ntrans(PetriNet *net)
 
 bool petri_conf_input(PetriNet *net, pn_place p, pn_trans t, pn_weight w)
 {
-    if (net == NULL){
-        return false;
-    }
-
-    if (p >= net->nplaces || t >= net->ntrans){
-        return false;
-    }
-
-    //TODO when w = 0 it waste space
-    PetriArc *arc = petri_arc(net, ARC_IN, t, p, true);
-    if (arc == NULL){
-        return false;
-    }
-    arc->weight = w;
-
-    return true;
+    return petri_conf_arc(net, ARC_IN, p, t, w);
 }/* petri_conf_input */
 
 bool petri_conf_output(PetriNet *net, pn_trans t, pn_place p, pn_weight w)
 {
-    //TODO merge with petri_cont_input
-    if (net == NULL){
-        return false;
-    }
-
-    if (p >= net->nplaces || t >= net->ntrans){
-        return false;
-    }
-
-    //TODO when w = 0 it waste space
-    PetriArc *arc = petri_arc(net, ARC_OUT, t, p, true);
-    if (arc == NULL){
-        return false;
-    }
-    arc->weight = w;
-
-    return true;
+    return petri_conf_arc(net, ARC_OUT, p, t, w);
 }/* petri_conf_output */
 
 void petri_marking_get(PetriNet *net, pn_weight *outmark)
@@ -189,10 +189,7 @@ void petri_marking_get(PetriNet *net, pn_weight *outmark)
         return;
     }
 
-    //TODO memmove
-    for (pn_place i=0; i < net->nplaces; i++){
-        outmark[i] = net->marking[i];
-    }
+    memmove(outmark, net->marking, net->nplaces * sizeof(pn_weight));
 }/* petri_marking_get */
 
 void petri_marking_set(PetriNet *net, const pn_weight *inmark)
@@ -201,10 +198,7 @@ void petri_marking_set(PetriNet *net, const pn_weight *inmark)
         return;
     }
 
-    //TODO memmove
-    for (pn_place i=0; i < net->nplaces; i++){
-        net->marking[i] = inmark[i];
-    }
+    memmove(net->marking, inmark, net->nplaces * sizeof(pn_weight));
 }/* petri_marking_set */
 
 /* M(p) >= I(t,p) for all p */

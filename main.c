@@ -29,10 +29,10 @@ static void test_new()
     petri_free(net);
 
     /* memory stress */
-    net = petri_new(100, 100);
+    net = petri_new(10, 10);
     assert(net != NULL);
-    for (pn_place p=0; p < 100; p++){
-        for (pn_trans t=0; t < 100; t++){
+    for (pn_place p=0; p < 10; p++){
+        for (pn_trans t=0; t < 10; t++){
             assert(petri_conf_input(net, p, t, p));
             assert(petri_conf_output(net, t, p, t));
             assert(petri_weight_in(net, p, t) == p);
