@@ -122,6 +122,7 @@ void petri_free(PetriNet *net)
     }
 
     free(net->arcs);
+    free(net->marking);
     free(net);
 }/* petri_free */
 
