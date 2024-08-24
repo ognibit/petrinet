@@ -3,9 +3,8 @@
  *
  * Author: Omar Rampado <omar@ognibit.it>
  *
- * TODO: index on transitions (list of in, out)
  * Version: 1.0
- * Simple implementation, array based, no optimization, ok for small nets.
+ * Implementation with transition index and arcs as linked list.
  */
 
 #include "petri.h"
@@ -18,25 +17,39 @@ typedef enum {
     ARC_OUT
 } pn_arcdir;
 
+typedef struct PetriArc PetriArc;
+
 struct PetriArc {
     pn_arcdir dir; /* direction */
     pn_place place;
     pn_trans trans;
     pn_weight weight;
+    PetriArc *next;
 };
-
-typedef struct PetriArc PetriArc;
 
 struct PetriNet {
     size_t nplaces;
     size_t ntrans;
-    size_t arcsLen;
-    size_t arcsSize;
     pn_weight *marking; /* size = nplaces */
-    PetriArc *arcs;
+    PetriArc **arcs;    /* size = ntrans */
 };
 
 /******************** PRIVATE ***********************************/
+
+static
+PetriArc * petri_arc_find(const PetriNet *net, pn_arcdir d, pn_trans t, pn_place p)
+{
+    PetriArc *arc = net->arcs[t];
+
+    while (arc != NULL){
+        if ((arc->dir == d) && (arc->place == p) && (arc->trans == t)){
+            return arc;
+        }
+        arc = arc->next;
+    }/* while */
+
+    return NULL;
+}/* petri_arc_find */
 
 /* Get the arc that match (D,T,P).
  * If it does not exists, create it when alloc is true.
@@ -45,12 +58,9 @@ struct PetriNet {
 static
 PetriArc * petri_arc(PetriNet *net, pn_arcdir d, pn_trans t, pn_place p, bool alloc)
 {
-    PetriArc *arc = NULL;
-    for (size_t i=0; i < net->arcsLen; i++){
-        arc = &net->arcs[i];
-        if ((arc->dir == d) && (arc->place == p) && (arc->trans == t)){
-            return arc;
-        }
+    PetriArc *arc = petri_arc_find(net, d, t, p);
+    if (arc != NULL){
+        return arc;
     }
 
     /* not found */
@@ -58,26 +68,20 @@ PetriArc * petri_arc(PetriNet *net, pn_arcdir d, pn_trans t, pn_place p, bool al
         return NULL;
     }
 
-    if (net->arcsLen >= net->arcsSize){
-
-        size_t nsize = net->arcsSize * 2;
-        PetriArc *arcs = (PetriArc*)reallocarray(net->arcs, nsize, sizeof(PetriArc));
-        if (arcs == NULL){
-            return NULL;
-        }
-
-        net->arcsSize = nsize;
-        net->arcs = arcs;
+    /* allocate a new arc */
+    arc = (PetriArc*)malloc(sizeof(PetriArc));
+    if (arc == NULL){
+        return NULL;
     }
 
-    /* return a new arc */
-    arc = &net->arcs[net->arcsLen];
+    arc->next = net->arcs[t];
+    net->arcs[t] = arc;
+
+    /* return the new arc */
     arc->dir = d;
     arc->place = p;
     arc->trans = t;
     arc->weight = 0;
-
-    net->arcsLen += 1;
 
     return arc;
 }/* petri_arc */
@@ -116,9 +120,7 @@ bool petri_conf_arc(PetriNet *net, pn_arcdir d, pn_place p, pn_trans t, pn_weigh
 
 PetriNet * petri_new(size_t nplaces, size_t ntrans)
 {
-    const size_t n = nplaces + ntrans;
-
-    PetriArc *arcs = (PetriArc*)calloc(n, sizeof(PetriArc));
+    PetriArc **arcs = (PetriArc**)calloc(ntrans, sizeof(PetriArc*));
     if (arcs == NULL){
         return NULL;
     }
@@ -138,8 +140,6 @@ PetriNet * petri_new(size_t nplaces, size_t ntrans)
 
     net->nplaces = nplaces;
     net->ntrans = ntrans;
-    net->arcsLen = 0;
-    net->arcsSize = n;
     net->marking = marking;
     net->arcs = arcs;
 
@@ -152,12 +152,26 @@ void petri_free(PetriNet *net)
         return;
     }
 
+    /* free arc lists */
+    for (pn_trans i=0; i < net->ntrans; i++){
+        PetriArc *curr = net->arcs[i];
+        PetriArc *next = NULL;
+
+        while (curr != NULL){
+            next = curr->next;
+            free(curr);
+            curr = next;
+        }/* while */
+
+        net->arcs[i] = NULL;
+    }/* for */
+
     free(net->arcs);
     free(net->marking);
     free(net);
 }/* petri_free */
 
-size_t petri_nplaces(PetriNet *net)
+size_t petri_nplaces(const PetriNet *net)
 {
     if (net == NULL){
         return 0;
@@ -165,7 +179,7 @@ size_t petri_nplaces(PetriNet *net)
     return net->nplaces;
 }/* petri_nplaces */
 
-size_t petri_ntrans(PetriNet *net)
+size_t petri_ntrans(const PetriNet *net)
 {
     if (net == NULL){
         return 0;
@@ -183,7 +197,7 @@ bool petri_conf_output(PetriNet *net, pn_trans t, pn_place p, pn_weight w)
     return petri_conf_arc(net, ARC_OUT, p, t, w);
 }/* petri_conf_output */
 
-void petri_marking_get(PetriNet *net, pn_weight *outmark)
+void petri_marking_get(const PetriNet *net, pn_weight *outmark)
 {
     if (net == NULL || outmark == NULL){
         return;
@@ -202,22 +216,24 @@ void petri_marking_set(PetriNet *net, const pn_weight *inmark)
 }/* petri_marking_set */
 
 /* M(p) >= I(t,p) for all p */
-bool petri_trans_enabled(PetriNet *net, pn_trans t)
+bool petri_trans_enabled(const PetriNet *net, pn_trans t)
 {
     if (net == NULL || t >= net->ntrans){
         return false;
     }
 
-    //TODO optimize with index on T
-
-    for (pn_place p=0; p < net->nplaces; p++){
+    /* since only the places connected to T are involved */
+    PetriArc *arc = net->arcs[t];
+    while (arc != NULL){
+        pn_place p = arc->place;
         pn_weight m = net->marking[p];
-        pn_weight inputs = petri_weight_in(net, p, t);
 
-        if (m < inputs){
+        if ((arc->dir == ARC_IN) && (m < arc->weight)){
             return false;
         }
-    }
+
+        arc = arc->next;
+    }/* while */
 
     return true;
 }/* petri_trans_enabled */
@@ -232,15 +248,26 @@ bool petri_fire(PetriNet *net, pn_trans t)
         return false;
     }
 
-    //TODO optimize with index on T
+    /* since only the places connected to T are involved */
+    PetriArc *arc = net->arcs[t];
+    while (arc != NULL){
+        pn_place p = arc->place;
+        pn_weight w = arc->weight;
 
-    for (pn_place p=0; p < net->nplaces; p++){
-        pn_weight m = net->marking[p];
-        pn_weight inputs = petri_weight_in(net, p, t);
-        pn_weight outputs = petri_weight_out(net, t, p);
+        switch (arc->dir){
+        case ARC_IN:
+            net->marking[p] -= w;
+            break;
+        case ARC_OUT:
+            net->marking[p] += w;
+            break;
+        default:
+            return false;
+        }/* switch */
 
-        net->marking[p] = m - inputs + outputs;
-    }
+        arc = arc->next;
+    }/* while */
+
     return true;
 }/* petri_fire */
 
@@ -249,7 +276,7 @@ bool petri_fire(PetriNet *net, pn_trans t)
  *
  * return the number of tokens in P. Zero is p out of range.
  */
-pn_weight petri_weight_of(PetriNet *net, pn_place p)
+pn_weight petri_weight_of(const PetriNet *net, pn_place p)
 {
     if (net == NULL || p >= net->nplaces){
         return 0;
@@ -258,9 +285,9 @@ pn_weight petri_weight_of(PetriNet *net, pn_place p)
     return net->marking[p];
 }/* petri_weight_of */
 
-pn_weight petri_weight_in(PetriNet *net, pn_place p, pn_trans t)
+pn_weight petri_weight_in(const PetriNet *net, pn_place p, pn_trans t)
 {
-    PetriArc *arc = petri_arc(net, ARC_IN, t, p, false);
+    const PetriArc *arc = petri_arc_find(net, ARC_IN, t, p);
     if (arc == NULL){
         return 0;
     }
@@ -268,9 +295,9 @@ pn_weight petri_weight_in(PetriNet *net, pn_place p, pn_trans t)
     return arc->weight;
 }/* petri_weight_in */
 
-pn_weight petri_weight_out(PetriNet *net, pn_trans t, pn_place p)
+pn_weight petri_weight_out(const PetriNet *net, pn_trans t, pn_place p)
 {
-    PetriArc *arc = petri_arc(net, ARC_OUT, t, p, false);
+    const PetriArc *arc = petri_arc_find(net, ARC_OUT, t, p);
     if (arc == NULL){
         return 0;
     }
