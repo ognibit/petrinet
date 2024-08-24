@@ -1,5 +1,11 @@
+# Binaries
+tests
+
 # Prerequisites
 *.d
+
+# CTags
+tags
 
 # Object files
 *.o
