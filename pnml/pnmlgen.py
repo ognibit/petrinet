@@ -25,6 +25,7 @@ def load_net(filename):
 def gen_header(net, modulename):
     headerBegin = """
 /* Generated from PNML file. */
+#pragma once
 #include "petri.h"
 
 """
@@ -45,40 +46,66 @@ def gen_header(net, modulename):
     # TRANSITIONS
     transEnum = modulename.capitalize() + "Transition"
     header += "enum %s {\n"%(transEnum)
-    trans = [IND+t.label.upper() for t in net.transitions.values()]
+    trans = [t.label.upper() for t in net.transitions.values()]
+    itrans = [IND+t for t in trans]
     ntrans = modulename.upper()+"_TRANS_ALL"
-    trans.append(IND+ntrans)
-    header += ",\n".join(trans)
+    itrans.append(IND+ntrans)
+    header += ",\n".join(itrans)
     header += "\n};\n"
 
     header += "\n"
 
+
     # FUNCTIONS
     funNew = "PetriNet * %s_petri_new()"%(modulename)
+    fplacestr = "const char * %s_petri_place_str(pn_place p)"%(modulename)
+    fstrtrans = "pn_trans %s_petri_str_trans(const char *s)"%(modulename)
 
-    header += funNew + ";\n"
+    header += "\n" + funNew + ";\n"
+    header += "\n" + fplacestr + ";\n"
+    header += "\n" + fstrtrans + ";\n"
 
     headerFn = modulename + ".h"
     with open(headerFn, "w") as f:
         f.write(header)
 
     return {"filename": headerFn,
-            "function": funNew,
+            "fnew": funNew,
+            "fplacestr": fplacestr,
+            "fstrtrans": fstrtrans,
             "nplaces": nplaces,
             "ntrans": ntrans,
             "places": places,
+            "trans": trans,
 
             }
 # gen_header
 
-def gen_source(net, modulename, hinfo):
-    begin = """/* Generated from PNML file */
-#include "petri.h"
-#include "%s"
+def gen_fplacestr(net, modulename, hinfo):
+    content = "%s {\n" % (hinfo["fplacestr"])
+    content += IND+'if (p >= %s) return NULL;\n' % (hinfo["nplaces"])
+    content += IND+"return %s[p];\n" % (hinfo["pnames"]);
+    content += "}/* %s */\n" % (hinfo["fplacestr"])
+    return content;
+# gen_fplacestr
 
-%s {\n
-"""
-    content = begin % (hinfo["filename"], hinfo["function"])
+
+def gen_fstrtrans(net, modulename, hinfo):
+    content = "%s {\n" % (hinfo["fstrtrans"])
+    content += IND+'if (s == NULL) return %s;\n'%(hinfo["ntrans"])
+    content += IND+"for (pn_trans i=0; i < %s; i++){\n"%(hinfo["ntrans"])
+    content += (IND*2)+"if (strcmp(s, %s[i]) == 0)\n"%(hinfo["tnames"])
+    content += (IND*3)+"return i;\n"
+    content += IND+"}/* for */\n"
+    content += IND+"return %s;\n" % (hinfo["ntrans"]);
+    content += "}/* %s */\n" % (hinfo["fstrtrans"])
+    return content;
+# gen_fstrtrans
+
+
+def gen_fnew(net, modulename, hinfo):
+
+    content = "%s {\n" % (hinfo["fnew"])
 
     content += IND + "PetriNet *net = petri_new(%s, %s);\n" % (
               hinfo["nplaces"], hinfo["ntrans"])
@@ -104,7 +131,40 @@ def gen_source(net, modulename, hinfo):
 
     # FINISH
     content += IND + "return net;\n"
-    content += "}/* %s */\n" % (hinfo["function"])
+    content += "}/* %s */\n" % (hinfo["fnew"])
+
+    return content
+# gen_fnew
+
+def gen_source(net, modulename, hinfo):
+    begin = """/* Generated from PNML file */
+#include "petri.h"
+#include "%s"
+#include <string.h>
+
+"""
+    # PLACES NAMES
+    pnames = modulename.upper()+"_PLACES_NAMES";
+    hinfo["pnames"] = pnames
+    begin += "const char *%s[%s] = {\n" % (
+              pnames, hinfo["nplaces"])
+    names = [IND+'[%s] = "%s"'%(p[1],p[1]) for p in hinfo["places"]]
+    begin += ",\n".join(names)
+    begin += "\n};\n";
+
+    # TRANSITIONS NAMES
+    tnames = modulename.upper()+"_TRANS_NAMES";
+    hinfo["tnames"] = tnames
+    begin += "const char *%s[%s] = {\n" % (
+              tnames, hinfo["ntrans"])
+    names = [IND+'[%s] = "%s"'%(t,t) for t in hinfo["trans"]]
+    begin += ",\n".join(names)
+    begin += "\n};\n";
+
+    content = begin % (hinfo["filename"])
+    content += gen_fplacestr(net, modulename, hinfo) + '\n'
+    content += gen_fstrtrans(net, modulename, hinfo) + '\n'
+    content += gen_fnew(net, modulename, hinfo) + '\n'
 
     fn = modulename + ".c"
 
