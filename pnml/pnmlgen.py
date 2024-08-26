@@ -33,7 +33,7 @@ def gen_header(net, modulename):
     # PLACES
     placeEnum = modulename.capitalize() + "Place"
     header += "enum %s {\n"%(placeEnum)
-    places = [(i, p.label, p.marking)
+    places = [(i, p.label.upper(), p.marking)
               for i,p in enumerate(net.places.values())]
     nplaces = modulename.upper()+"_PLACES_ALL"
     pls = [IND+p[1] for p in places]
@@ -45,7 +45,7 @@ def gen_header(net, modulename):
     # TRANSITIONS
     transEnum = modulename.capitalize() + "Transition"
     header += "enum %s {\n"%(transEnum)
-    trans = [IND+t.label for t in net.transitions.values()]
+    trans = [IND+t.label.upper() for t in net.transitions.values()]
     ntrans = modulename.upper()+"_TRANS_ALL"
     trans.append(IND+ntrans)
     header += ",\n".join(trans)
@@ -94,8 +94,8 @@ def gen_source(net, modulename, hinfo):
 
     # FLOW
     for arc in net.edges:
-        a = arc.find_source().label
-        b = arc.find_target().label
+        a = arc.find_source().label.upper()
+        b = arc.find_target().label.upper()
         w = int(arc.inscription)
         if arc.source in net.transitions:
             content += IND + "petri_conf_output(net, %s, %s, %i);\n" % (a, b, w)
